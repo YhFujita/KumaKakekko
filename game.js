@@ -40,13 +40,20 @@ let obstacleTimer = 0; // 障害物生成タイマー
 let groundHeight = 20; // 地面の高さ（下の余白）
 let stageMessageTimer = 0; // ステージクリアなどのメッセージ表示用タイマー
 let itemSpawned = false; // そのステージで回復アイテムを出したか
+let isStageUpgradePending = false; // ステージ移行待機フラグ
 
-const restartContainer = document.getElementById("restartContainer");
-const restartButton = document.getElementById("restartButton");
+const restartContainer = null; // 削除
+const restartButton = null; // 削除
 
-restartButton.addEventListener("click", () => {
-  resetGame();
+// マウス操作の無効化
+canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
 });
+canvas.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+});
+// テキスト選択無効化 (CSSでも行うがJSでも補強)
+canvas.style.userSelect = 'none';
 
 function resetGame() {
   score = 0;
@@ -60,22 +67,31 @@ function resetGame() {
   frameSpeed = 10;
   obstacles.length = 0; // 障害物全削除
   itemSpawned = false; // アイテム済みフラグ解除
+  isStageUpgradePending = false; // 待機フラグ解除
   bear.y = canvas.height - spriteHeight - 70;
   bear.jumpVelocity = 0;
   bear.isJumping = false;
 
-  restartContainer.style.display = "none";
-  gameLoop();
+  bear.isJumping = false;
+
+  bear.isJumping = false;
+
+  // gameLoopは常時回っているのでここでは呼ばない
 }
 
 const jumpSound = new Audio("jump07.mp3"); // ジャンプ音声の設定
 
 // キーボードイベント
+// キーボードイベント
 document.addEventListener("keydown", (e) => {
-  if (e.code === "Space" && !bear.isJumping) {
-    bear.isJumping = true;
-    bear.jumpVelocity = -10; // ジャンプの初速
-    jumpSound.play(); // ジャンプ時に音声を再生
+  if (e.code === "Space") {
+    if (isGameOver) {
+      resetGame();
+    } else if (!bear.isJumping) {
+      bear.isJumping = true;
+      bear.jumpVelocity = -10; // ジャンプの初速
+      jumpSound.play(); // ジャンプ時に音声を再生
+    }
   }
 });
 
@@ -223,10 +239,10 @@ function updateAndDrawObstacles() {
 
     // 特殊移動
     if (obj.moveType === 'wiggle') {
-      obj.wiggleOffset = Math.sin(frameCount * 0.1) * 30; // 左右に揺れる（描画位置だけズラす、あるいはX自体を変える）
-      // ここでは単純に描画時にXをずらすのではなく、当たり判定も動かすためXに加算せず、判定時に考慮するか、X自体を振動させる
-      // 今回はシンプルにX進行に加えて振動させる
-      obj.x += Math.cos(frameCount * 0.1) * 2;
+      // 左右に揺れる動きを強調、後ろにも動くように
+      // speedが2のとき、振幅が5なら +3 (後ろへ) ~ -7 (前へ) となる
+      obj.x += Math.cos(frameCount * 0.05) * 5;
+      // 元の直線移動(x -= speed) は上の行で行われている
     } else if (obj.moveType === 'bounce') {
       // アイテムのバウンド
       obj.y += obj.vy;
@@ -285,7 +301,7 @@ function updateAndDrawObstacles() {
           lives--;
           if (lives <= 0) {
             isGameOver = true;
-            restartContainer.style.display = "block";
+            // restartContainer.style.display = "block"; // 削除
           } else {
             isInvincible = true;
             invincibleTimer = 60;
@@ -321,60 +337,85 @@ function drawBear() {
 
 // ステージアップ処理
 function checkStageUp() {
-  // ステージ1の場合、特定スコアでステージアップ
-  // ステージクリア条件
-  let nextStageScore = stage * 10; // テストのため、10, 20, 30, 40, 50...
+  // すでに待機中なら何もしない
+  if (isStageUpgradePending) return;
 
-  if (score >= nextStageScore) {
+  // ステージクリア条件
+  // Stage 1: 10点
+  // Stage 2: 30点
+  // Stage 3: 60点
+  // Stage 4: 100点
+  // Stage 5: 150点
+
+  // Stage 5: 150点
+
+  let nextStageThreshold = Infinity; // デフォルトは無限大（バグ回避）
+  if (stage === 1) nextStageThreshold = 10;
+  else if (stage === 2) nextStageThreshold = 30;
+  else if (stage === 3) nextStageThreshold = 60;
+  else if (stage === 4) nextStageThreshold = 100;
+  else if (stage === 5) nextStageThreshold = 150;
+
+  // デバッグ用ログ (バグ調査)
+  if (Math.random() < 0.01) console.log(`Stage check: Stage ${stage}, Score ${score}, Threshold ${nextStageThreshold}`);
+
+  if (score >= nextStageThreshold) {
     if (stage === 5) {
-      // ゲームクリア
+      // ゲームクリアは即時実行
       isGameOver = true;
-      // クリア演出はgameLoop内で描画
-      // ここではこれ以上進まないようにする
       return;
     }
 
-    stage++;
-    stageMessageTimer = 180;
-    itemSpawned = false; // 次のステージ用にリセット
-    // 難易度上昇
-    obstacleSpeed += 1;
-    if (obstacleSpeed > 10) obstacleSpeed = 10;
+    // 次のステージへ進む条件を満たしたが、
+    // 即座に変えずに「障害物がなくなるまで待つ」状態にする
+    isStageUpgradePending = true;
   }
+}
+
+// 実際にステージを上げる処理 (障害物がなくなった後に実行)
+function executeStageUpgrade() {
+  stage++;
+  stageMessageTimer = 180;
+  itemSpawned = false; // 次のステージ用にリセット
+  isStageUpgradePending = false; // 待機解除
+  obstacleTimer = 60; // 新ステージ開始直後のインターバル
+
+  // 難易度(スピード)調整
+  // ステージ3・4のスピード低下は撤回し、徐々に速くするシンプルなロジックへ
+  obstacleSpeed += 1;
+  if (obstacleSpeed > 10) obstacleSpeed = 10;
 }
 
 // ゲームループ
 function gameLoop() {
-  if (isGameOver) {
-    console.log("ゲームオーバー状態です。"); // デバッグメッセージ
-    return;
-  }
 
   // キャンバスをクリア
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // フレームの更新
-  frameCount++;
-  if (frameCount >= frameSpeed) {
-    frameCount = 0;
-    currentFrame = (currentFrame + 1) % totalFrames;
-  }
-
-  // クマのジャンプ処理
-  if (bear.isJumping) {
-    bear.y += bear.jumpVelocity;
-    bear.jumpVelocity += 0.45; // 重力
-    if (bear.y >= canvas.height - spriteHeight - 70) { // 元のY座標に戻す
-      bear.y = canvas.height - spriteHeight - 70; // 元の位置に戻す
-      bear.isJumping = false; // ジャンプ終了
+  if (!isGameOver) {
+    // フレームの更新
+    frameCount++;
+    if (frameCount >= frameSpeed) {
+      frameCount = 0;
+      currentFrame = (currentFrame + 1) % totalFrames;
     }
-  }
 
-  // 無敵時間の処理
-  if (isInvincible) {
-    invincibleTimer--;
-    if (invincibleTimer <= 0) {
-      isInvincible = false;
+    // クマのジャンプ処理
+    if (bear.isJumping) {
+      bear.y += bear.jumpVelocity;
+      bear.jumpVelocity += 0.45; // 重力
+      if (bear.y >= canvas.height - spriteHeight - 70) { // 元のY座標に戻す
+        bear.y = canvas.height - spriteHeight - 70; // 元の位置に戻す
+        bear.isJumping = false; // ジャンプ終了
+      }
+    }
+
+    // 無敵時間の処理
+    if (isInvincible) {
+      invincibleTimer--;
+      if (invincibleTimer <= 0) {
+        isInvincible = false;
+      }
     }
   }
 
@@ -382,33 +423,65 @@ function gameLoop() {
   drawGround();
 
   // クマを描画
-  // 無敵時間中は点滅させる
-  if (!isInvincible || Math.floor(Date.now() / 100) % 2 === 0) {
+  // ゲームオーバー時も描画する
+  if (!isGameOver) {
+    // 通常時：無敵時間中は点滅
+    if (!isInvincible || Math.floor(Date.now() / 100) % 2 === 0) {
+      drawBear();
+    }
+  } else {
+    // ゲームオーバー時：点滅なしで描画
     drawBear();
   }
 
-  // 障害物を生成・管理
-  obstacleTimer--;
-  if (obstacleTimer <= 0) {
-    createObstacle();
-    // 次の生成までの時間を設定
-    if (stage === 1) {
-      obstacleTimer = 120; // 固定（約2秒）
-    } else {
-      // ステージ2: ランダムかつ狭すぎない間隔
-      // 最低60フレーム(1秒)あける、最大150フレーム(2.5秒)など
-      obstacleTimer = Math.floor(Math.random() * 90) + 60;
+  if (!isGameOver) {
+    // 障害物を生成・管理
+    obstacleTimer--;
+    // ステージ移行待機中は新たな障害物を出さない (画面がクリアになるのを待つ)
+    if (obstacleTimer <= 0 && !isStageUpgradePending) {
+      createObstacle();
+      // 次の生成までの時間を設定
+      if (stage === 1) {
+        obstacleTimer = 120; // 固定（約2秒）
+      } else {
+        // ステージ2: ランダムかつ狭すぎない間隔
+        obstacleTimer = Math.floor(Math.random() * 90) + 60;
+      }
     }
-  }
 
-  // 障害物を描画
-  updateAndDrawObstacles();
+    // 障害物を描画＆更新
+    updateAndDrawObstacles();
 
-  // ジャンプして障害物を避けた場合のスコア加算
-  if (bear.isJumping && obstacles.length > 0) {
-    const obstacle = obstacles[obstacles.length - 1]; // 最後の障害物を取得
-    if (bear.x + bear.width > obstacle.x && bear.x < obstacle.x + obstacle.width) {
-      score++; // 障害物を避けたらスコア加算
+    // 安全なステージ移行処理
+    // 待機フラグが立っており、かつ画面上に障害物（アイテム含む全て）がない場合に移行実行
+    if (isStageUpgradePending && obstacles.length === 0) {
+      executeStageUpgrade();
+    }
+
+    // ジャンプして障害物を避けた場合のスコア加算
+    if (bear.isJumping && obstacles.length > 0) {
+      const obstacle = obstacles[obstacles.length - 1]; // 最後の障害物を取得
+      if (bear.x + bear.width > obstacle.x && bear.x < obstacle.x + obstacle.width) {
+        score++; // 障害物を避けたらスコア加算
+      }
+    }
+
+    // ステージアップ処理
+    checkStageUp();
+  } else {
+    // ゲームオーバー時は更新せず、既存の障害物を描画だけする
+    for (const obj of obstacles) {
+      if (obj.category === 'item') {
+        drawStar(obj.x + 15, obj.y + 15, 5, 15, 7);
+      } else if (obj.category === 'projectile') {
+        ctx.fillStyle = obj.color;
+        ctx.beginPath();
+        ctx.arc(obj.x + 10, obj.y + 10, 10, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = obj.color || "red";
+        ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
+      }
     }
   }
 
@@ -434,19 +507,30 @@ function gameLoop() {
     ctx.textAlign = "start"; // 戻す
   }
 
-  // ゲームクリア表示
-  if (stage === 5 && isGameOver && lives > 0) {
-    ctx.fillStyle = "gold";
-    ctx.font = "bold 50px Arial";
+  // ゲームクリア/オーバー表示
+  if (isGameOver) {
     ctx.textAlign = "center";
-    ctx.fillText("CONGRATULATIONS!", canvas.width / 2, canvas.height / 2);
+
+    // ゲームクリア判定 (ステージ5でライフが残っている場合)
+    if (stage === 5 && lives > 0) {
+      ctx.fillStyle = "gold";
+      ctx.font = "bold 50px Arial";
+      ctx.fillText("おめでとう！げーむくりあ！", canvas.width / 2, canvas.height / 2);
+    } else {
+      // それ以外はゲームオーバー
+      ctx.fillStyle = "red";
+      ctx.font = "bold 50px Arial";
+      ctx.fillText("ゲームオーバー", canvas.width / 2, canvas.height / 2);
+    }
+
+    ctx.fillStyle = "black";
     ctx.font = "30px Arial";
-    ctx.fillText("Game Clear!", canvas.width / 2, canvas.height / 2 + 50);
-    restartContainer.style.display = "block"; // リスタート可能に
+    ctx.fillText("スペースキーで さいしょから", canvas.width / 2, canvas.height / 2 + 50);
+    ctx.textAlign = "start";
   }
 
   // ステージアップ処理
-  checkStageUp();
+  // checkStageUp(); // 上に移動済み
 
   // 次のフレームを要求
   requestAnimationFrame(gameLoop);
