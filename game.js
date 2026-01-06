@@ -11,7 +11,8 @@ const totalFrames = 4; // フレーム数
 // クマの設定
 const bear = {
   x: 50,
-  y: canvas.height - spriteHeight - 60,
+  y: canvas.height - spriteHeight - 70, // 地面(20) + 余白(50)
+  width: spriteWidth,
   width: spriteWidth,
   height: spriteHeight,
   jumpHeight: 170, // ジャンプの高さ
@@ -23,7 +24,7 @@ const bear = {
 const obstacles = [];
 const obstacleWidth = 40;
 const obstacleHeight = 40;
-const obstacleSpeed = 4;
+let obstacleSpeed = 4;
 
 // ゲームの状態
 let currentFrame = 0;
@@ -36,7 +37,34 @@ let lives = 3; // ライフ
 let isInvincible = false; // 無敵状態
 let invincibleTimer = 0; // 無敵時間のタイマー
 let obstacleTimer = 0; // 障害物生成タイマー
-let groundHeight = 60; // 地面の高さ（下の余白）
+let groundHeight = 20; // 地面の高さ（下の余白）
+let stageMessageTimer = 0; // ステージクリアなどのメッセージ表示用タイマー
+
+const restartContainer = document.getElementById("restartContainer");
+const restartButton = document.getElementById("restartButton");
+
+restartButton.addEventListener("click", () => {
+  resetGame();
+});
+
+function resetGame() {
+  score = 0;
+  stage = 1;
+  lives = 3;
+  isGameOver = false;
+  isInvincible = false;
+  invincibleTimer = 0;
+  obstacleTimer = 120;
+  obstacleSpeed = 4;
+  frameSpeed = 10;
+  obstacles.length = 0; // 障害物全削除
+  bear.y = canvas.height - spriteHeight - 70;
+  bear.jumpVelocity = 0;
+  bear.isJumping = false;
+
+  restartContainer.style.display = "none";
+  gameLoop();
+}
 
 const jumpSound = new Audio("jump07.mp3"); // ジャンプ音声の設定
 
@@ -122,13 +150,14 @@ function drawObstacles() {
       if (
         bear.x < obstacle.x + obstacle.width &&
         bear.x + bear.width > obstacle.x &&
-        bear.y + bear.height > obstacle.y
+        bear.y + bear.height + 60 > obstacle.y // クマの座標が高いため、当たり判定を下方向に拡張
       ) {
         // 衝突！
         lives--;
         if (lives <= 0) {
           isGameOver = true;
-          alert("ゲームオーバー! スコア: " + score);
+          // alert("ゲームオーバー! スコア: " + score); // アラート形式から変更
+          restartContainer.style.display = "block"; // リスタートボタン表示
         } else {
           // ダメージ演出＆無敵開始
           isInvincible = true;
@@ -166,8 +195,9 @@ function checkStageUp() {
   // ステージ1の場合、特定スコアでステージアップ
   if (stage === 1 && score >= 10) { // テスト用に10点で設定（元は30）
     stage = 2;
-    // ステージクリア演出
-    alert("ステージクリア！ステージ2へ！");
+    // ステージクリア演出 (アラートだと止まってしまう可能性があるため、メッセージタイマーを設定)
+    stageMessageTimer = 180; // 3秒間表示
+
     // パラメータ変更
     obstacleSpeed += 2;
     // 背景色を変えるなどしてもよい
@@ -195,8 +225,8 @@ function gameLoop() {
   if (bear.isJumping) {
     bear.y += bear.jumpVelocity;
     bear.jumpVelocity += 0.45; // 重力
-    if (bear.y >= canvas.height - spriteHeight - 60) { // 元のY座標に戻す
-      bear.y = canvas.height - spriteHeight - 60; // 元の位置に戻す
+    if (bear.y >= canvas.height - spriteHeight - 70) { // 元のY座標に戻す
+      bear.y = canvas.height - spriteHeight - 70; // 元の位置に戻す
       bear.isJumping = false; // ジャンプ終了
     }
   }
@@ -209,14 +239,14 @@ function gameLoop() {
     }
   }
 
+  // 地面を描画
+  drawGround();
+
   // クマを描画
   // 無敵時間中は点滅させる
   if (!isInvincible || Math.floor(Date.now() / 100) % 2 === 0) {
     drawBear();
   }
-
-  // 地面を描画
-  drawGround();
 
   // 障害物を生成・管理
   obstacleTimer--;
@@ -252,6 +282,16 @@ function gameLoop() {
   // ライフ表示
   for (let i = 0; i < lives; i++) {
     drawStar(100 + i * 30, 80, 5, 10, 5);
+  }
+
+  // ステージ遷移等のメッセージ表示
+  if (stageMessageTimer > 0) {
+    stageMessageTimer--;
+    ctx.fillStyle = "blue";
+    ctx.font = "bold 40px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("STAGE 2 START!", canvas.width / 2, canvas.height / 2);
+    ctx.textAlign = "start"; // 戻す
   }
 
   // ステージアップ処理
