@@ -39,6 +39,7 @@ let invincibleTimer = 0; // 無敵時間のタイマー
 let obstacleTimer = 0; // 障害物生成タイマー
 let groundHeight = 20; // 地面の高さ（下の余白）
 let stageMessageTimer = 0; // ステージクリアなどのメッセージ表示用タイマー
+let itemSpawned = false; // そのステージで回復アイテムを出したか
 
 const restartContainer = document.getElementById("restartContainer");
 const restartButton = document.getElementById("restartButton");
@@ -58,6 +59,7 @@ function resetGame() {
   obstacleSpeed = 4;
   frameSpeed = 10;
   obstacles.length = 0; // 障害物全削除
+  itemSpawned = false; // アイテム済みフラグ解除
   bear.y = canvas.height - spriteHeight - 70;
   bear.jumpVelocity = 0;
   bear.isJumping = false;
@@ -79,23 +81,95 @@ document.addEventListener("keydown", (e) => {
 
 // 障害物を生成
 function createObstacle() {
-  // obstacleTypesからランダム、あるいはステージに応じて選択
-  // ステージ1は単純な四角(ID:1)のみ、ステージ2はランダムなど
+  if (stage >= 3 && !itemSpawned && Math.random() < 0.3) {
+    // ステージ3以降、確率で回復アイテム生成（1ステージ1回）
+    createHealItem();
+    itemSpawned = true;
+    return;
+  }
+
   let typeData;
+  let moveType = 'normal';
+  let category = 'obstacle';
+  let vx = 0; // 追加の速度成分
+
+  // ステージごとの生成ロジック
   if (stage === 1) {
     typeData = obstacleTypes.find(t => t.id === 1) || { color: "red", width: 40, height: 40, yOffset: 0 };
-  } else {
-    // ランダムに選択
+  } else if (stage === 2) {
     typeData = obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)];
+  } else if (stage === 3) {
+    // ステージ3: 左右に動く障害物を混ぜる
+    typeData = obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)];
+    if (Math.random() < 0.5) {
+      moveType = 'wiggle';
+    }
+  } else if (stage === 4) {
+    // ステージ4: リス（弾を撃つ）を混ぜる
+    if (Math.random() < 0.5) {
+      // リス（茶色い小さめの四角で代用、あるいはID定義）
+      typeData = { color: "brown", width: 40, height: 40, yOffset: 0, id: 99 };
+      category = 'shooter';
+    } else {
+      typeData = obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)];
+    }
+  } else if (stage >= 5) {
+    // ステージ5: 全部入り
+    const r = Math.random();
+    if (r < 0.4) {
+      typeData = obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)];
+      moveType = 'wiggle';
+    } else if (r < 0.7) {
+      typeData = { color: "brown", width: 40, height: 40, yOffset: 0, id: 99 };
+      category = 'shooter';
+    } else {
+      typeData = obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)];
+    }
   }
 
   obstacles.push({
     x: canvas.width,
-    y: canvas.height - typeData.height - groundHeight - typeData.yOffset, // 地面の上に配置
+    y: canvas.height - typeData.height - groundHeight - typeData.yOffset,
     width: typeData.width,
     height: typeData.height,
     color: typeData.color,
-    type: typeData.type
+    type: typeData.type,
+    moveType: moveType,
+    category: category,
+    baseY: canvas.height - typeData.height - groundHeight - typeData.yOffset, // 基準位置
+    wiggleOffset: 0, // 揺れ計算用
+    shootTimer: 60, // 発射間隔
+    vx: vx
+  });
+}
+
+function createHealItem() {
+  obstacles.push({
+    x: canvas.width,
+    y: canvas.height - 150, // 空中に出現
+    width: 30,
+    height: 30,
+    color: "yellow",
+    type: -1, // アイテム
+    moveType: 'bounce',
+    category: 'item',
+    vy: 0,
+    groundY: canvas.height - 30 - groundHeight
+  });
+}
+
+// ドングリ生成
+function createAcorn(x, y) {
+  obstacles.push({
+    x: x,
+    y: y,
+    width: 20,
+    height: 20,
+    color: "#8B4513", // こげ茶
+    type: -2,
+    moveType: 'projectile',
+    category: 'projectile',
+    vx: 8 // 高速
   });
 }
 
@@ -136,41 +210,96 @@ function drawStar(cx, cy, spikes, outerRadius, innerRadius) {
 
 // 障害物を描画
 // 障害物を描画
-function drawObstacles() {
+// 障害物・敵・アイテムの更新と描画
+function updateAndDrawObstacles() {
   for (let i = obstacles.length - 1; i >= 0; i--) {
-    const obstacle = obstacles[i];
-    obstacle.x -= obstacleSpeed;
+    const obj = obstacles[i];
 
-    // 障害物を描画
-    ctx.fillStyle = obstacle.color || "red";
-    ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+    // 移動ロジック
+    let speed = obstacleSpeed;
+    if (obj.category === 'projectile') speed = obj.vx; // 弾は独自の速度
 
-    // 衝突判定（無敵時間中は判定しない）
-    if (!isInvincible && !isGameOver) {
-      if (
-        bear.x < obstacle.x + obstacle.width &&
-        bear.x + bear.width > obstacle.x &&
-        bear.y + bear.height + 60 > obstacle.y // クマの座標が高いため、当たり判定を下方向に拡張
-      ) {
-        // 衝突！
-        lives--;
-        if (lives <= 0) {
-          isGameOver = true;
-          // alert("ゲームオーバー! スコア: " + score); // アラート形式から変更
-          restartContainer.style.display = "block"; // リスタートボタン表示
-        } else {
-          // ダメージ演出＆無敵開始
-          isInvincible = true;
-          invincibleTimer = 60; // 60フレーム(約1秒)無敵
-          // 衝突した障害物は消す？それともすり抜ける？今回はすり抜ける（多段ヒット防止のため無敵にするので）
+    obj.x -= speed;
+
+    // 特殊移動
+    if (obj.moveType === 'wiggle') {
+      obj.wiggleOffset = Math.sin(frameCount * 0.1) * 30; // 左右に揺れる（描画位置だけズラす、あるいはX自体を変える）
+      // ここでは単純に描画時にXをずらすのではなく、当たり判定も動かすためXに加算せず、判定時に考慮するか、X自体を振動させる
+      // 今回はシンプルにX進行に加えて振動させる
+      obj.x += Math.cos(frameCount * 0.1) * 2;
+    } else if (obj.moveType === 'bounce') {
+      // アイテムのバウンド
+      obj.y += obj.vy;
+      obj.vy += 0.5; // 重力
+      if (obj.y > obj.groundY) {
+        obj.y = obj.groundY;
+        obj.vy = -10; // 跳ねる
+      }
+    }
+
+    // 敵のアクション
+    if (obj.category === 'shooter') {
+      obj.shootTimer--;
+      if (obj.shootTimer <= 0) {
+        createAcorn(obj.x, obj.y + 10);
+        obj.shootTimer = 120; // 次の発射まで
+      }
+    }
+
+    // 描画
+    if (obj.category === 'item') {
+      drawStar(obj.x + 15, obj.y + 15, 5, 15, 7); // ☆を描画
+    } else if (obj.category === 'projectile') {
+      ctx.fillStyle = obj.color;
+      ctx.beginPath();
+      ctx.arc(obj.x + 10, obj.y + 10, 10, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = obj.color || "red";
+      ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
+    }
+
+    // 衝突判定（無敵時間中は判定しない、アイテムは別）
+    // 当たり判定の調整
+    const hitBoxMarginLeft = 30;
+    const hitBoxMarginRight = 10;
+
+    let isHit = false;
+    if (
+      bear.x + hitBoxMarginLeft < obj.x + obj.width &&
+      bear.x + bear.width - hitBoxMarginRight > obj.x &&
+      bear.y + bear.height + 60 > obj.y
+    ) {
+      isHit = true;
+    }
+
+    if (isHit) {
+      if (obj.category === 'item') {
+        // アイテムゲット
+        if (lives < 3) lives++; // ライフ回復
+        obstacles.splice(i, 1);
+        continue; // 処理終了
+      } else {
+        // 敵・障害物
+        if (!isInvincible && !isGameOver) {
+          lives--;
+          if (lives <= 0) {
+            isGameOver = true;
+            restartContainer.style.display = "block";
+          } else {
+            isInvincible = true;
+            invincibleTimer = 60;
+          }
         }
       }
     }
 
-    // 障害物が画面外に出たら削除
-    if (obstacle.x + obstacle.width < 0) {
+    // 画面外削除
+    if (obj.x + obj.width < 0) {
       obstacles.splice(i, 1);
-      score++; // 障害物を避けたらスコア加算
+      if (obj.category !== 'projectile' && obj.category !== 'item') {
+        score++; // 弾やアイテム以外はスコア加算
+      }
     }
   }
 }
@@ -193,14 +322,24 @@ function drawBear() {
 // ステージアップ処理
 function checkStageUp() {
   // ステージ1の場合、特定スコアでステージアップ
-  if (stage === 1 && score >= 10) { // テスト用に10点で設定（元は30）
-    stage = 2;
-    // ステージクリア演出 (アラートだと止まってしまう可能性があるため、メッセージタイマーを設定)
-    stageMessageTimer = 180; // 3秒間表示
+  // ステージクリア条件
+  let nextStageScore = stage * 10; // テストのため、10, 20, 30, 40, 50...
 
-    // パラメータ変更
-    obstacleSpeed += 2;
-    // 背景色を変えるなどしてもよい
+  if (score >= nextStageScore) {
+    if (stage === 5) {
+      // ゲームクリア
+      isGameOver = true;
+      // クリア演出はgameLoop内で描画
+      // ここではこれ以上進まないようにする
+      return;
+    }
+
+    stage++;
+    stageMessageTimer = 180;
+    itemSpawned = false; // 次のステージ用にリセット
+    // 難易度上昇
+    obstacleSpeed += 1;
+    if (obstacleSpeed > 10) obstacleSpeed = 10;
   }
 }
 
@@ -263,7 +402,7 @@ function gameLoop() {
   }
 
   // 障害物を描画
-  drawObstacles();
+  updateAndDrawObstacles();
 
   // ジャンプして障害物を避けた場合のスコア加算
   if (bear.isJumping && obstacles.length > 0) {
@@ -290,8 +429,20 @@ function gameLoop() {
     ctx.fillStyle = "blue";
     ctx.font = "bold 40px Arial";
     ctx.textAlign = "center";
-    ctx.fillText("STAGE 2 START!", canvas.width / 2, canvas.height / 2);
+    const msg = stage === 5 ? "FINAL STAGE START!" : "STAGE " + stage + " START!";
+    ctx.fillText(msg, canvas.width / 2, canvas.height / 2);
     ctx.textAlign = "start"; // 戻す
+  }
+
+  // ゲームクリア表示
+  if (stage === 5 && isGameOver && lives > 0) {
+    ctx.fillStyle = "gold";
+    ctx.font = "bold 50px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("CONGRATULATIONS!", canvas.width / 2, canvas.height / 2);
+    ctx.font = "30px Arial";
+    ctx.fillText("Game Clear!", canvas.width / 2, canvas.height / 2 + 50);
+    restartContainer.style.display = "block"; // リスタート可能に
   }
 
   // ステージアップ処理
