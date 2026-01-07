@@ -459,10 +459,16 @@ function gameLoop() {
     }
 
     // ジャンプして障害物を避けた場合のスコア加算
-    if (bear.isJumping && obstacles.length > 0) {
-      const obstacle = obstacles[obstacles.length - 1]; // 最後の障害物を取得
-      if (bear.x + bear.width > obstacle.x && bear.x < obstacle.x + obstacle.width) {
-        score++; // 障害物を避けたらスコア加算
+    if (bear.isJumping) {
+      for (const obstacle of obstacles) {
+        // すでにスコア加算済みの障害物は無視
+        if (obstacle.isScored) continue;
+
+        // 障害物とX軸で重なっているか
+        if (bear.x + bear.width > obstacle.x && bear.x < obstacle.x + obstacle.width) {
+          score++; // スコア加算
+          obstacle.isScored = true; // フラグを立てて二重加算を防ぐ
+        }
       }
     }
 
